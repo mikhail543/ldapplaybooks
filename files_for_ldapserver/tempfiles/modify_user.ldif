@@ -1,0 +1,7 @@
+dn: cn=shmon,ou=groups,dc=ziyotek,dc=local
+changetype: modify
+add: memberuid
+memberuid: shmonka
+
+
+

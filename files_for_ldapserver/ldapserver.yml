@@ -1,0 +1,134 @@
+---
+- name: Imstallation LDAP Server 
+  hosts: l
+  become: yes
+  vars:
+    html_dir: /var/www/html/ 
+  tasks: 
+    
+    - name: Disabling selinux permanently 
+      selinux: state=disabled 
+    
+    - name: Disabling firewall 
+      service: name=firewalld state=stopped enabled=False 
+    
+    - name: Installation all packages 
+      yum: name={{ item }} state=latest
+      loop: 
+        - openldap
+        - openldap-clients 
+        - openldap-servers
+        - openssl
+        - httpd
+        - epel-release 
+        - phpldapadmin
+    - name: Starting slapd daemon
+      service: name=slapd state=started  enabled=yes
+    
+    - name: Copying temporary .ldif files for making changes on main config files
+      copy: src=/root/tempfiles/{{ item }} dest=/root/ mode='0755'
+      loop:
+        - hdb.ldif
+        - monitor.ldif
+        - key.ldif
+        - base.ldif
+        - group.ldif
+        - user.ldif
+    
+    - name: Copying certificates 
+      copy: src=/root/certs/{{ item }} dest=/etc/openldap/certs/
+      loop: 
+        - CA.crt
+        - CA.key
+        - CA.srl
+        - ldap.crt
+        - ldap.csr
+        - ldap.key
+    
+    - name: Starting and enabling httpd daemon
+      service: name=httpd state=started enabled=yes 
+    - name: Checking folder before applying changes 
+      find: 
+        paths: '{{ html_dir }}'
+      register: filesFound
+    
+    - block: # =======Block will work only if the file exist inside /var/www/html/=======      
+      - name:  Applying all changes from monitor.ldif 
+        command:  ldapmodify -Y EXTERNAL -H ldapi:/// -f /root/monitor.ldif
+      - name: Applying changes from hdb.ldif
+        command: ldapmodify -Y EXTERNAL -H ldapi:/// -f /root/hdb.ldif
+      - name: Applying changes from key.ldif  
+        command: ldapmodify -Y EXTERNAL -H ldapi:/// -f /root/key.ldif
+        ignore_errors: yes 
+        notify: Restarting slapd daemon
+      when: filesFound.matched == 0 
+
+    - name: SSH into master server required for execution commands !
+      pause: 
+        prompt: 'SSH into your master Ldap server and execute the following commands :  ldapadd -x -W -D "cn=admin,dc=ziyotek3,dc=local" -f base.ldif  and Then press Enter'
+                                                                                        
+
+    
+    - name:  Copying certificate for sharing with clients from WEB
+      copy: src=/root/certs/CA.crt dest={{ html_dir }}
+     
+    - name: Copying PHP  first config file
+      template: 
+        src: /root/ansible/phpldapadmin.conf.j2
+        dest: /etc/httpd/conf.d/phpldapadmin.conf
+    - name: Copying PHP second config file for Webpage 
+      template:
+        src: /root/ansible/config.php.j2
+        dest: /etc/phpldapadmin/config.php
+        #notify: Restarting httpd service 
+        
+    - name: Restarting httpd service
+      service: name=httpd state=restarted  enabled=yes 
+       
+    - name: Executing commands 
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/openldap/schema/cosine.ldif
+      ignore_errors: yes
+    - name: Executing commands 
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/openldap/schema/nis.ldif
+      ignore_errors: yes
+    - name: Executing commands 
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/openldap/schema/inetorgperson.ldif
+      ignore_errors: yes 
+
+    - name: SSH into master server required for execution commands !
+      pause: 
+        prompt: 'Now you can add user and group  from the existing files by using commands : ---> ldapadd -x -W -D "cn=admin,dc=ziyotek3,dc=local" -f user.ldif   ---> ldapadd -x -W -D "cn=admin,dc=ziyotek3,dc=local" -f group.ldif  Press Enter whenever you done! '
+      
+  
+    
+    - name: Lets see if everything is OK at this stage 
+      shell: slaptest -u 
+      register: result 
+  
+    - name: Showing the result from previous command 
+      debug:
+        var: result
+        #msg: result 
+      delay: 7
+    
+    # This part going to add users and groups into Schemas and requires a password input !!!
+    #- name: Import Base Structure Using ldapadd
+      #expect: 
+        #command: ldapadd -x -W -D "cn=admin,dc=ziyotek3,dc=local" -f base.ldif
+        #responses: 
+       #   "'Enter LDAP Password:' 'pass'"
+
+
+  handlers:
+  - name: Restarting slapd daemon
+    service: name=slapd state=restarted enabled=yes
+  - name: Restarting httpd service 
+    service: name=httpd state=restarted enabled=yes 
+
+      
+
+
+
+
+
+        

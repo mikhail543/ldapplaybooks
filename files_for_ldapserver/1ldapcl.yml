@@ -1,0 +1,41 @@
+---
+- name: Installing ldap clients 
+  hosts: c
+  become: yes 
+  tasks: 
+    - name: installing packages 
+      yum: 
+        name:  wget,  autofs, nfs-utils, openldap-clients, nss-pam-ldapd, authconfig
+        state:  latest 
+    - name: disabling firewalld
+      service:
+        name: firewalld
+        state: stopped  
+        enabled: False  
+    - name: Create directory for certificate from Master Ldap
+      ansible.builtin.file: 
+        path: /etc/openldap/cacerts
+        state: directory
+        mode: '0775'
+    - name: Downloading certificate from Ldap server
+      get_url:
+        url: http://192.168.1.15/CA.crt
+        dest: /etc/openldap/cacerts/ 
+    - name: Changing configuration for Ldap client with command authconfig
+      ansible.builtin.shell: authconfig --enableldapauth --enableldap --ldapserver=192.168.1.15 --ldapbasedn="dc=ziyotek3,dc=local"  --update
+    - name: Copying configuration files for Autofs 
+      template: 
+        src: /auto.master.j2
+        dest: /etc/auto.master
+    - name: Copying second config file 
+      template:
+        src: /auto.user.j2
+        dest: /etc/auto.user 
+    - name: Turn on Autofs and restart it 
+      service: 
+        name: autofs
+        enabled: yes 
+        state: restarted 
+
+     
+        
